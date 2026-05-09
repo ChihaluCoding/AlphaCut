@@ -1,34 +1,16 @@
 # AlphaCut
 
-PySide6 と ToonOut を使うローカル処理版です。画像は外部APIへ送信せず、モデル取得と推論をローカル環境で行います。
+AlphaCutは、画像の背景を自動で切り抜き、透過PNGとして保存できるソフトです。
 
-## セットアップ
+## 最低スペック
 
-```powershell
-cd desktop_app
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python app.py
-```
-
-CUDA 版 PyTorch を使う場合は、先に公式の環境に合った PyTorch を入れてから `pip install -r requirements.txt` を実行してください。
-
-既存の Python 環境に `torch 2.7.1+cu118` が入っている場合は、`torchvision` も同じ CUDA 11.8 向けに合わせてください。
-
-```powershell
-python -m pip install torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu118
-python -m pip install timm kornia einops
-```
-
-PySide6 の DLL エラーが出る場合は、既存の PySide6 が壊れているかバージョンが合っていない可能性があります。
-
-```powershell
-python -m pip install --force-reinstall -r requirements.txt
-```
+- OS: Windows 10 / 11 64bit
+- CPU: 4コア以上の64bit CPU
+- メモリ: 16GB以上
+- 空き容量: 10GB以上
+- GPU: なしでも動作可能。ただし、NVIDIA GPUとCUDA対応環境がある場合は処理が高速になります。
+- ネットワーク: 初回実行時のAIモデル取得にインターネット接続が必要です。
 
 ## 注意
-
-- 初回実行時は `joelseytre/toonout` のモデル重みと `ZhengPeng7/BiRefNet` のモデル構造を Hugging Face から取得します。
-- GPU がある場合は CUDA を使います。ない場合は CPU で動きますが時間がかかります。
-- 透過結果は PNG として保存してください。
+- このソフトは、イラストの背景を切り抜くことを目的として作成されました。イラスト以外の画像に対しては、正確な切り抜きができない可能性があります。
+- AIモデルの取得には、インターネット接続が必要です。
