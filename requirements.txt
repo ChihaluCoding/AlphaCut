@@ -1,0 +1,11 @@
+PySide6==6.6.3
+numpy<2
+pillow>=10.0
+torch>=2.3
+torchvision>=0.18
+transformers>=4.40
+huggingface_hub>=0.23
+safetensors>=0.4
+timm>=0.9
+kornia>=0.7
+einops>=0.7
