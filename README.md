@@ -2,6 +2,8 @@
 
 AlphaCutは、AIモデルを使用して画像の背景を透過させ、PNGとして保存できるソフトです。
 
+![AlphaCutの画面](img.png)
+
 ## 最低スペック
 
 - OS: Windows 10 / 11 64bit

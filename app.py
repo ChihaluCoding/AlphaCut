@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 APP_NAME = "AlphaCut"
 APP_DIR = Path(__file__).resolve().parent
+SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 def resource_path(relative_path: str) -> str:
@@ -46,6 +47,14 @@ def resource_path(relative_path: str) -> str:
 
 
 APP_ICON_PATH = Path(resource_path("assets/alphacut.ico"))
+
+
+def is_supported_image_path(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_SUFFIXES
+
+
+def collect_supported_image_paths(paths: list[str | Path]) -> list[Path]:
+    return [Path(path) for path in paths if is_supported_image_path(Path(path))]
 
 
 class RemovalWorker(QObject):
@@ -78,6 +87,7 @@ class PreviewLabel(QLabel):
         self.setObjectName("previewCanvas")
         self.setWordWrap(True)
         self.resize(340, 420)
+        self._updating_pixmap = False
 
     def set_image(self, image: Image.Image) -> None:
         preview = image.convert("RGBA")
@@ -123,17 +133,22 @@ class PreviewLabel(QLabel):
             self.update_pixmap()
 
     def update_pixmap(self) -> None:
-        if self._source_pixmap is None:
+        if self._source_pixmap is None or self._updating_pixmap:
             return
 
-        available_size = self.target_preview_size()
-        scaled = self._source_pixmap.scaled(
-            available_size,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        self.setPixmap(scaled)
-        self.resize(scaled.size())
+        self._updating_pixmap = True
+        try:
+            available_size = self.target_preview_size()
+            scaled = self._source_pixmap.scaled(
+                available_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self.setPixmap(scaled)
+            if self.size() != scaled.size():
+                self.resize(scaled.size())
+        finally:
+            self._updating_pixmap = False
 
     def target_preview_size(self) -> QSize:
         if not self._fit_to_view:
@@ -148,6 +163,9 @@ class PreviewLabel(QLabel):
         height = max(1, viewport_size.height() - padding)
         return QSize(width, height)
 
+    def is_fit_to_view(self) -> bool:
+        return self._fit_to_view
+
     def wheelEvent(self, event) -> None:  # noqa: N802
         if event.modifiers() & Qt.ControlModifier:
             if event.angleDelta().y() > 0:
@@ -158,6 +176,21 @@ class PreviewLabel(QLabel):
             return
 
         super().wheelEvent(event)
+
+
+class PreviewScrollArea(QScrollArea):
+    def __init__(self, preview_label: PreviewLabel) -> None:
+        super().__init__()
+        self.preview_label = preview_label
+        self.setObjectName("previewScroll")
+        self.setWidget(preview_label)
+        self.setWidgetResizable(False)
+        self.setAlignment(Qt.AlignCenter)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self.preview_label.is_fit_to_view():
+            QTimer.singleShot(0, self.preview_label.update_pixmap)
 
 
 _remover: "BiRefNetRemover | None" = None
@@ -187,6 +220,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.resize(1240, 780)
         self.setMinimumSize(1120, 720)
+        self.setAcceptDrops(True)
 
         self.source_path: Path | None = None
         self.result: Image.Image | None = None
@@ -265,22 +299,71 @@ class MainWindow(QMainWindow):
             "",
             "画像ファイル (*.png *.jpg *.jpeg *.webp *.bmp)",
         )
+        self.apply_image_paths(collect_supported_image_paths(paths), append=False)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if self._drop_contains_supported_images(event):
+            event.acceptProposedAction()
+            return
+
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drop_contains_supported_images(event):
+            event.acceptProposedAction()
+            return
+
+        event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        dropped_paths = self._supported_paths_from_drop_event(event)
+        if not dropped_paths:
+            event.ignore()
+            return
+
+        self.apply_image_paths(dropped_paths, append=True)
+        event.acceptProposedAction()
+
+    def apply_image_paths(self, paths: list[Path], append: bool) -> None:
         if not paths:
             return
 
-        self.batch_paths = [Path(path) for path in paths]
+        if append:
+            self.batch_paths.extend(paths)
+        else:
+            self.batch_paths = paths
+
         self.batch_results = []
         self.batch_failures = []
         self.batch_index = 0
         self.result_list.clear()
-        self.source_path = self.batch_paths[0]
+        if self.source_path is None or not append:
+            self.source_path = self.batch_paths[0]
         self.result = None
         self.reset_progress()
         self.run_button.setEnabled(True)
         self.save_button.setEnabled(False)
-        self.status_label.setText(f"選択: {len(self.batch_paths)}件")
+        if append:
+            self.status_label.setText(f"追加: {len(paths)}件 / 合計 {len(self.batch_paths)}件")
+        else:
+            self.status_label.setText(f"選択: {len(self.batch_paths)}件")
         self._set_preview(self.source_preview, Image.open(self.source_path).convert("RGBA"))
         self.result_preview.clear_image()
+
+    def _drop_contains_supported_images(self, event) -> bool:
+        return self.open_button.isEnabled() and bool(self._supported_paths_from_drop_event(event))
+
+    def _supported_paths_from_drop_event(self, event) -> list[Path]:
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            return []
+
+        local_paths = [
+            Path(url.toLocalFile())
+            for url in mime_data.urls()
+            if url.isLocalFile()
+        ]
+        return collect_supported_image_paths(local_paths)
 
     def start_removal(self) -> None:
         if not self.batch_paths:
@@ -528,7 +611,7 @@ class MainWindow(QMainWindow):
         panel.setLayout(layout)
         return panel
 
-    def create_preview_card(self, title_text: str, preview_label: QLabel) -> QFrame:
+    def create_preview_card(self, title_text: str, preview_label: PreviewLabel) -> QFrame:
         card = create_card("previewCard")
         layout = QVBoxLayout()
         layout.setContentsMargins(12, 12, 12, 12)
@@ -565,11 +648,7 @@ class MainWindow(QMainWindow):
         header.addWidget(fit_button)
         header.addWidget(zoom_label)
 
-        scroll_area = QScrollArea()
-        scroll_area.setObjectName("previewScroll")
-        scroll_area.setWidget(preview_label)
-        scroll_area.setWidgetResizable(False)
-        scroll_area.setAlignment(Qt.AlignCenter)
+        scroll_area = PreviewScrollArea(preview_label)
 
         layout.addLayout(header)
         layout.addWidget(scroll_area, 1)
